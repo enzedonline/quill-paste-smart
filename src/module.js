@@ -7,7 +7,6 @@ const Delta = Quill.import('delta');
 class QuillPasteSmart extends Clipboard {
   constructor(quill, options) {
     super(quill, options);
-    window.qps = this;
     this.allowed = options.allowed;
     this.keepSelection = options.keepSelection;
     this.substituteBlockElements = options.substituteBlockElements;
@@ -102,18 +101,16 @@ class QuillPasteSmart extends Clipboard {
         content = DOMPurify.sanitize(html, DOMPurifyOptions);
         delta = delta.insert(content);
       } else {
+        // Convert table headers to cells
         if (DOMPurifyOptions.ALLOWED_TAGS.includes('table')) {
           html = this.tableHeadersToCells(html);
-          console.log(html)
         }
         if (this.substituteBlockElements !== false) {
-          // html = DOMPurify.sanitize(html, { ...DOMPurifyOptions, ...{ RETURN_DOM: true, WHOLE_DOCUMENT: false } });
           html = this.substitute(html, DOMPurifyOptions);
           content = html.innerHTML;
         } else {
           content = DOMPurify.sanitize(html, DOMPurifyOptions);
         }
-        console.log(content)
         delta = delta.concat(this.convert({ html: content }));
       }
     }
@@ -136,23 +133,18 @@ class QuillPasteSmart extends Clipboard {
     // Move first <tr> from <thead> to <tbody>, convert all <th> to <td>
     const tempDiv = document.createElement('div');
     tempDiv.innerHTML = html;
-
-    // Find all table elements in the temporary div
     const tables = tempDiv.querySelectorAll('table');
-
-    // Iterate over each table found
     tables.forEach(table => {
       // Check if the table has a <thead> element
       const thead = table.querySelector('thead');
       if (thead) {
-        // Move the <thead>'s <tr> child to be the first child of <tbody>
+        // Move the <thead>'s first <tr> child to be the first child of <tbody>
         const tbody = table.querySelector('tbody');
         if (tbody) {
           const firstRow = thead.querySelector('tr');
           tbody.insertBefore(firstRow, tbody.firstChild);
         }
       }
-
       // Convert all <th> elements to <td> elements
       const thElements = table.querySelectorAll('th');
       thElements.forEach(th => {
@@ -161,8 +153,6 @@ class QuillPasteSmart extends Clipboard {
         th.parentNode.replaceChild(td, th);
       });
     });
-
-    // Return the innerHTML of the temporary div
     return tempDiv.innerHTML;
   }
 
@@ -327,19 +317,18 @@ class QuillPasteSmart extends Clipboard {
               tidy.ALLOWED_TAGS.push('tr');
               tidy.ALLOWED_TAGS.push('td');
             }
+            if (undefinedAttr) {
+              tidy.ALLOWED_ATTR.push('width');
+            }
             break;
 
         }
       });
-
+      // support custom toolbar buttons from options
       if (toolbar?.controls) {
-        console.log('start')
         this.customToolbarButtons?.forEach((button) => {
-          console.log(`button ${button}`)
           if (toolbar.controls.some(control => control[0] === button.module)) {
-            console.log('included')
             button.allowedTags?.forEach((tag) => {
-              console.log(tag)
               tidy.ALLOWED_TAGS.push(tag);
             });
             button.allowedAttr?.forEach((attr) => {
