@@ -7,33 +7,27 @@ const Delta = Quill.import('delta');
 class QuillPasteSmart extends Clipboard {
   constructor(quill, options) {
     super(quill, options);
-
+    window.qps = this;
     this.allowed = options.allowed;
     this.keepSelection = options.keepSelection;
     this.substituteBlockElements = options.substituteBlockElements;
     this.magicPasteLinks = options.magicPasteLinks;
     this.hooks = options.hooks;
     this.handleImagePaste = options.handleImagePaste;
+    this.customToolbarButtons = options.customToolbarButtons;
   }
 
-  onPaste(e) {
+  onCapturePaste(e) {
+    if (e.defaultPrevented || !this.quill.isEnabled()) return;
+
     e.preventDefault();
+
     const range = this.quill.getSelection();
+    if (range == null) return;
 
-    let text;
-    let html;
-    let file;
-
-    if ((!e.clipboardData || !e.clipboardData.getData) &&
-      (window.clipboardData && window.clipboardData.getData)) {
-      // compatibility with older IE versions
-      text = window.clipboardData.getData('Text');
-    } else {
-      text = e.clipboardData.getData('text/plain');
-      html = e.clipboardData.getData('text/html');
-      file = e.clipboardData?.items?.[0];
-    }
-
+    let text = e.clipboardData?.getData('text/plain');
+    let html = e.clipboardData?.getData('text/html');
+    let file = e.clipboardData?.items?.[0];
     let delta = new Delta().retain(range.index).delete(range.length);
 
     const DOMPurifyOptions = this.getDOMPurifyOptions();
@@ -108,6 +102,10 @@ class QuillPasteSmart extends Clipboard {
         content = DOMPurify.sanitize(html, DOMPurifyOptions);
         delta = delta.insert(content);
       } else {
+        if (DOMPurifyOptions.ALLOWED_TAGS.includes('table')) {
+          html = this.tableHeadersToCells(html);
+          console.log(html)
+        }
         if (this.substituteBlockElements !== false) {
           // html = DOMPurify.sanitize(html, { ...DOMPurifyOptions, ...{ RETURN_DOM: true, WHOLE_DOCUMENT: false } });
           html = this.substitute(html, DOMPurifyOptions);
@@ -115,7 +113,8 @@ class QuillPasteSmart extends Clipboard {
         } else {
           content = DOMPurify.sanitize(html, DOMPurifyOptions);
         }
-        delta = delta.concat(this.convert(content));
+        console.log(content)
+        delta = delta.concat(this.convert({ html: content }));
       }
     }
 
@@ -128,8 +127,43 @@ class QuillPasteSmart extends Clipboard {
 
     if (this.keepSelection) this.quill.setSelection(range.index, delta.length(), Quill.sources.SILENT);
     else this.quill.setSelection(range.index + delta.length(), Quill.sources.SILENT);
-    this.quill.scrollIntoView();
+    this.quill.scrollSelectionIntoView();
     DOMPurify.removeAllHooks();
+  }
+
+  tableHeadersToCells(html) {
+    // Quill table doesn't support header cells
+    // Move first <tr> from <thead> to <tbody>, convert all <th> to <td>
+    const tempDiv = document.createElement('div');
+    tempDiv.innerHTML = html;
+
+    // Find all table elements in the temporary div
+    const tables = tempDiv.querySelectorAll('table');
+
+    // Iterate over each table found
+    tables.forEach(table => {
+      // Check if the table has a <thead> element
+      const thead = table.querySelector('thead');
+      if (thead) {
+        // Move the <thead>'s <tr> child to be the first child of <tbody>
+        const tbody = table.querySelector('tbody');
+        if (tbody) {
+          const firstRow = thead.querySelector('tr');
+          tbody.insertBefore(firstRow, tbody.firstChild);
+        }
+      }
+
+      // Convert all <th> elements to <td> elements
+      const thElements = table.querySelectorAll('th');
+      thElements.forEach(th => {
+        const td = document.createElement('td');
+        td.innerHTML = th.innerHTML;
+        th.parentNode.replaceChild(td, th);
+      });
+    });
+
+    // Return the innerHTML of the temporary div
+    return tempDiv.innerHTML;
   }
 
   getDOMPurifyOptions() {
@@ -263,6 +297,8 @@ class QuillPasteSmart extends Clipboard {
               tidy.ALLOWED_ATTR.push('src');
               tidy.ALLOWED_ATTR.push('title');
               tidy.ALLOWED_ATTR.push('alt');
+              tidy.ALLOWED_ATTR.push('height');
+              tidy.ALLOWED_ATTR.push('width');
             }
             break;
 
@@ -274,6 +310,8 @@ class QuillPasteSmart extends Clipboard {
               tidy.ALLOWED_ATTR.push('frameborder');
               tidy.ALLOWED_ATTR.push('allowfullscreen');
               tidy.ALLOWED_ATTR.push('src');
+              tidy.ALLOWED_ATTR.push('height');
+              tidy.ALLOWED_ATTR.push('width');
             }
             break;
 
@@ -282,144 +320,114 @@ class QuillPasteSmart extends Clipboard {
               tidy.ALLOWED_TAGS.push(control[0]);
             }
             break;
+
+          case 'table':
+            if (undefinedTags) {
+              tidy.ALLOWED_TAGS.push('table');
+              tidy.ALLOWED_TAGS.push('tr');
+              tidy.ALLOWED_TAGS.push('td');
+            }
+            break;
+
         }
       });
+
+      if (toolbar?.controls) {
+        console.log('start')
+        this.customToolbarButtons?.forEach((button) => {
+          console.log(`button ${button}`)
+          if (toolbar.controls.some(control => control[0] === button.module)) {
+            console.log('included')
+            button.allowedTags?.forEach((tag) => {
+              console.log(tag)
+              tidy.ALLOWED_TAGS.push(tag);
+            });
+            button.allowedAttr?.forEach((attr) => {
+              tidy.ALLOWED_ATTR.push(attr);
+            });
+          }
+        });
+      }
     }
 
     return tidy;
   }
 
-  // replace forbidden block elements with a p tag
-  substitute(html, DOMPurifyOptions) {
-    let substitution;
+// replace forbidden block elements with a p tag
+substitute(html, DOMPurifyOptions) {
+  let substitution;
 
-    const headings = ['h1', 'h2', 'h3', 'h4', 'h5', 'h6'];
-    const blockElements = [
-      'p',
-      'div',
-      'section',
-      'article',
-      'fieldset',
-      'address',
-      'aside',
-      'blockquote',
-      'canvas',
-      'dl',
-      'figcaption',
-      'figure',
-      'footer',
-      'form',
-      'header',
-      'main',
-      'nav',
-      'noscript',
-      'ol',
-      'pre',
-      'table',
-      'tfoot',
-      'ul',
-      'video',
-    ];
-    const newLineElements = ['li', 'dt', 'dd', 'hr'];
+  const headings = ['h1', 'h2', 'h3', 'h4', 'h5', 'h6'];
+  const blockElements = [
+    'p',
+    'div',
+    'section',
+    'article',
+    'fieldset',
+    'address',
+    'aside',
+    'blockquote',
+    'canvas',
+    'dl',
+    'figcaption',
+    'figure',
+    'footer',
+    'form',
+    'header',
+    'main',
+    'nav',
+    'noscript',
+    'ol',
+    'pre',
+    'table',
+    'tfoot',
+    'ul',
+    'video',
+  ];
+  const newLineElements = ['li', 'dt', 'dd', 'hr'];
 
-    DOMPurify.addHook('uponSanitizeElement', (node, data, config) => {
-      // check if current tag is a heading
-      // - is it supported?
-      // - no? - replace it with <p> and <b>
-      // -----------------
-      // check if current tag is a block element
-      // - is it supported?
-      // - no? - replace it with <p>
-      // -----------------
-      // check if current tag is a new line element
-      // - is it supported?
-      // - no? - remove the tag and append a <br>
+  DOMPurify.addHook('uponSanitizeElement', (node, data, config) => {
+    // check if current tag is a heading
+    // - is it supported?
+    // - no? - replace it with <p> and <b>
+    // -----------------
+    // check if current tag is a block element
+    // - is it supported?
+    // - no? - replace it with <p>
+    // -----------------
+    // check if current tag is a new line element
+    // - is it supported?
+    // - no? - remove the tag and append a <br>
 
-      // find possible substitution
-      let i = 0;
-      while (!substitution && i < 3) {
-        if (DOMPurifyOptions.ALLOWED_TAGS.includes(blockElements[i])) substitution = blockElements[i];
-        ++i;
-      }
-
-      if (substitution && node.tagName && !DOMPurifyOptions.ALLOWED_TAGS.includes(node.tagName.toLowerCase())) {
-        const tagName = node.tagName.toLowerCase();
-        if (headings.includes(tagName)) {
-          node.innerHTML = `<${substitution}><b>${node.innerHTML}</b></${substitution}>`;
-        } else if (blockElements.includes(tagName)) {
-          node.innerHTML = `<${substitution}>${node.innerHTML}</${substitution}>`;
-        } else if (newLineElements.includes(tagName)) {
-          node.innerHTML = `${node.innerHTML}<br>`;
-        }
-      }
-    });
-
-    html = DOMPurify.sanitize(html, { ...DOMPurifyOptions, ...{ RETURN_DOM: true, WHOLE_DOCUMENT: false } });
-    DOMPurify.removeAllHooks();
-
-    // fix quill bug #3333
-    // span content placed into the next tag
-
-    const createElement = (node) => {
-      const element = document.createElement(node.tagName.toLowerCase());
-      const attributes = node.attributes;
-      if (attributes.length) {
-        Array.from(attributes).forEach(el => element.setAttribute(el.nodeName, el.value));
-      }
-      return element;
+    // find possible substitution
+    let i = 0;
+    while (!substitution && i < 3) {
+      if (DOMPurifyOptions.ALLOWED_TAGS.includes(blockElements[i])) substitution = blockElements[i];
+      ++i;
     }
 
-    let depth = 0;
-    const walkTheDOM = (node, func) => {
-      func(node, depth);
-      // node = node.firstChild;
-      if (depth <= 1) node = node.firstChild;
-      else node = undefined;
-      while (node) {
-        ++depth;
-        walkTheDOM(node, func);
-        node = node.nextSibling;
+    if (substitution && node.tagName && !DOMPurifyOptions.ALLOWED_TAGS.includes(node.tagName.toLowerCase())) {
+      const tagName = node.tagName.toLowerCase();
+      if (headings.includes(tagName)) {
+        node.innerHTML = `<${substitution}><b>${node.innerHTML}</b></${substitution}>`;
+      } else if (blockElements.includes(tagName)) {
+        node.innerHTML = `<${substitution}>${node.innerHTML}</${substitution}>`;
+      } else if (newLineElements.includes(tagName)) {
+        node.innerHTML = `${node.innerHTML}<br>`;
       }
-      --depth;
-    };
+    }
+  });
 
-    let block;
-    const fixedDom = document.createElement('body');
-    walkTheDOM(html, (node, depth) => {
-      if (depth === 1) {
-        if (node.tagName && blockElements.includes(node.tagName.toLowerCase())) {
-          if (block) block = undefined;
-          const element = createElement(node);
+  html = DOMPurify.sanitize(html, { ...DOMPurifyOptions, ...{ RETURN_DOM: true, WHOLE_DOCUMENT: false } });
+  DOMPurify.removeAllHooks();
 
-          element.innerHTML = node.innerHTML;
-          fixedDom.appendChild(element);
-        } else {
-          if (block === undefined) {
-            block = document.createElement(substitution);
-            fixedDom.appendChild(block);
-          }
+  return html;
+}
 
-          if (node.tagName) {
-            const element = createElement(node);
-
-            if (node.innerHTML) element.innerHTML = node.innerHTML;
-            block.appendChild(element);
-          } else {
-            // plain text
-            const element = document.createTextNode(node.textContent);
-            block.appendChild(element);
-          }
-        }
-      }
-    });
-
-    return fixedDom;
-  }
-
-  isURL(str) {
-    const pattern = /^(?:(?:https?|ftp):\/\/)(?:\S+(?::\S*)?@)?(?:(?!10(?:\.\d{1,3}){3})(?!127(?:\.\d{1,3}){3})(?!169\.254(?:\.\d{1,3}){2})(?!192\.168(?:\.\d{1,3}){2})(?!172\.(?:1[6-9]|2\d|3[0-1])(?:\.\d{1,3}){2})(?:[1-9]\d?|1\d\d|2[01]\d|22[0-3])(?:\.(?:1?\d{1,2}|2[0-4]\d|25[0-5])){2}(?:\.(?:[1-9]\d?|1\d\d|2[0-4]\d|25[0-4]))|(?:(?:[a-z\u00a1-\uffff0-9]+-?)*[a-z\u00a1-\uffff0-9]+)(?:\.(?:[a-z\u00a1-\uffff0-9]+-?)*[a-z\u00a1-\uffff0-9]+)*(?:\.(?:[a-z\u00a1-\uffff]{2,})))(?::\d{2,5})?(?:\/[^\s]*)?$/isu;
-    return !!pattern.test(str);
-  }
+isURL(str) {
+  const pattern = /^(?:(?:https?|ftp):\/\/)(?:\S+(?::\S*)?@)?(?:(?!10(?:\.\d{1,3}){3})(?!127(?:\.\d{1,3}){3})(?!169\.254(?:\.\d{1,3}){2})(?!192\.168(?:\.\d{1,3}){2})(?!172\.(?:1[6-9]|2\d|3[0-1])(?:\.\d{1,3}){2})(?:[1-9]\d?|1\d\d|2[01]\d|22[0-3])(?:\.(?:1?\d{1,2}|2[0-4]\d|25[0-5])){2}(?:\.(?:[1-9]\d?|1\d\d|2[0-4]\d|25[0-4]))|(?:(?:[a-z\u00a1-\uffff0-9]+-?)*[a-z\u00a1-\uffff0-9]+)(?:\.(?:[a-z\u00a1-\uffff0-9]+-?)*[a-z\u00a1-\uffff0-9]+)*(?:\.(?:[a-z\u00a1-\uffff]{2,})))(?::\d{2,5})?(?:\/[^\s]*)?$/isu;
+  return !!pattern.test(str);
+}
 }
 
 Quill.register('modules/clipboard', QuillPasteSmart, true);
