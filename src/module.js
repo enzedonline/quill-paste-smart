@@ -103,15 +103,17 @@ class QuillPasteSmart extends Clipboard {
         delta = delta.insert(content);
       } else {
         // Convert table headers to cells
-        html = this.tableHeadersToCells(html);
+        html = this.tableHeadersToCells(html, DOMPurifyOptions);
+
         if (this.substituteBlockElements !== false) {
-          html = this.substitute(html, DOMPurifyOptions);
+          let substitution;
+          [html, substitution] = this.substitute(html, DOMPurifyOptions);
           content = html.innerHTML;
-        } else {
-          content = DOMPurify.sanitize(html, DOMPurifyOptions);
           if (this.removeConsecutiveSubstitutionTags) {
             content = this.collapseConsecutiveSubstitutionTags(content, substitution);
           }
+        } else {
+          content = DOMPurify.sanitize(html, DOMPurifyOptions);
         }
         delta = delta.concat(this.convert({ html: content }));
       }
@@ -134,6 +136,7 @@ class QuillPasteSmart extends Clipboard {
     // Remove all consecutive occurances of substitution (e.g. <p></p>) from html, include tags with only whitespace
     const tempDiv = document.createElement('div');
     tempDiv.innerHTML = html;
+    console.log(tempDiv.innerHTML)
     const tags = tempDiv.querySelectorAll(substitution);
     let removeNextTag = false;
     tags.forEach(tag => {
@@ -148,10 +151,11 @@ class QuillPasteSmart extends Clipboard {
         removeNextTag = false;
       }
     });
+    console.log(tempDiv.innerHTML)
     return tempDiv.innerHTML;
   }
 
-  tableHeadersToCells(html) {
+  tableHeadersToCells(html, DOMPurifyOptions) {
     // Quill table doesn't support header cells
     // Move first <tr> from <thead> to <tbody>, convert all <th> to <td>
     const tempDiv = document.createElement('div');
@@ -168,6 +172,7 @@ class QuillPasteSmart extends Clipboard {
           tbody.insertBefore(firstRow, tbody.firstChild);
         }
       }
+      thead.remove();
       // Convert all <th> elements to <td> elements
       const thElements = table.querySelectorAll('th');
       thElements.forEach(th => {
@@ -175,9 +180,20 @@ class QuillPasteSmart extends Clipboard {
         td.innerHTML = th.innerHTML;
         th.parentNode.replaceChild(td, th);
       });
+      // if table not allowed tag, convert content to paragraphs
+      if (!DOMPurifyOptions.ALLOWED_TAGS.includes('table')) {
+        table.outerHTML = this.convertTableToParagraphs(table);
+      }
     });
     return tempDiv.innerHTML;
   }
+
+  convertTableToParagraphs(tableElement) {
+    return Array.from(tableElement.querySelectorAll('tr')).map(tr => {
+      const rowText = Array.from(tr.querySelectorAll('td')).map(td => td.innerHTML).join(' ');
+      return (this.substituteBlockElements !== false ) ? `<p>${rowText}</p>` : `${rowText} `;
+    }).join('');
+  };
 
   getDOMPurifyOptions() {
     let tidy = {};
@@ -388,6 +404,7 @@ substitute(html, DOMPurifyOptions) {
     'noscript',
     'ol',
     'pre',
+    'table',
     'tr',
     'ul',
     'video',
@@ -429,7 +446,7 @@ substitute(html, DOMPurifyOptions) {
   html = DOMPurify.sanitize(html, { ...DOMPurifyOptions, ...{ RETURN_DOM: true, WHOLE_DOCUMENT: false } });
   DOMPurify.removeAllHooks();
 
-  return html;
+  return [html, substitution];
 }
 
 isURL(str) {
