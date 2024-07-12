@@ -317,9 +317,6 @@ class QuillPasteSmart extends Clipboard {
               tidy.ALLOWED_TAGS.push('tr');
               tidy.ALLOWED_TAGS.push('td');
             }
-            if (undefinedAttr) {
-              tidy.ALLOWED_ATTR.push('width');
-            }
             break;
 
         }
