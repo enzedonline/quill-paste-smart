@@ -13,7 +13,7 @@ class QuillPasteSmart extends Clipboard {
     this.magicPasteLinks = options.magicPasteLinks;
     this.hooks = options.hooks;
     this.handleImagePaste = options.handleImagePaste;
-    this.customToolbarButtons = options.customToolbarButtons;
+    this.customButtons = options.customButtons;
   }
 
   onCapturePaste(e) {
@@ -326,7 +326,7 @@ class QuillPasteSmart extends Clipboard {
       });
       // support custom toolbar buttons from options
       if (toolbar?.controls) {
-        this.customToolbarButtons?.forEach((button) => {
+        this.customButtons?.forEach((button) => {
           if (toolbar.controls.some(control => control[0] === button.module)) {
             button.allowedTags?.forEach((tag) => {
               tidy.ALLOWED_TAGS.push(tag);
