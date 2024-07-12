@@ -102,9 +102,7 @@ class QuillPasteSmart extends Clipboard {
         delta = delta.insert(content);
       } else {
         // Convert table headers to cells
-        if (DOMPurifyOptions.ALLOWED_TAGS.includes('table')) {
-          html = this.tableHeadersToCells(html);
-        }
+        html = this.tableHeadersToCells(html);
         if (this.substituteBlockElements !== false) {
           html = this.substitute(html, DOMPurifyOptions);
           content = html.innerHTML;
@@ -365,8 +363,7 @@ substitute(html, DOMPurifyOptions) {
     'noscript',
     'ol',
     'pre',
-    'table',
-    'tfoot',
+    'tr',
     'ul',
     'video',
   ];
