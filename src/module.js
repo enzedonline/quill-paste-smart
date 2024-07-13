@@ -136,7 +136,6 @@ class QuillPasteSmart extends Clipboard {
     // Remove all consecutive occurances of substitution (e.g. <p></p>) from html, include tags with only whitespace
     const tempDiv = document.createElement('div');
     tempDiv.innerHTML = html;
-    console.log(tempDiv.innerHTML)
     const tags = tempDiv.querySelectorAll(substitution);
     let removeNextTag = false;
     tags.forEach(tag => {
@@ -151,7 +150,6 @@ class QuillPasteSmart extends Clipboard {
         removeNextTag = false;
       }
     });
-    console.log(tempDiv.innerHTML)
     return tempDiv.innerHTML;
   }
 
