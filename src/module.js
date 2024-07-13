@@ -102,8 +102,13 @@ class QuillPasteSmart extends Clipboard {
         content = DOMPurify.sanitize(html, DOMPurifyOptions);
         delta = delta.insert(content);
       } else {
-        // Convert table headers to cells
-        html = this.tableHeadersToCells(html, DOMPurifyOptions);
+        if (DOMPurifyOptions.ALLOWED_TAGS.includes('table')) {
+          // Convert table headers to cells
+          html = this.tableHeadersToCells(html);
+        } else {
+          // Convert rows and cells to block and inline content 
+          html = this.convertTableContent(html);
+        }
 
         if (this.substituteBlockElements !== false) {
           let substitution;
@@ -153,7 +158,7 @@ class QuillPasteSmart extends Clipboard {
     return tempDiv.innerHTML;
   }
 
-  tableHeadersToCells(html, DOMPurifyOptions) {
+  tableHeadersToCells(html) {
     // Quill table doesn't support header cells
     // Move first <tr> from <thead> to <tbody>, convert all <th> to <td>
     const tempDiv = document.createElement('div');
@@ -178,20 +183,26 @@ class QuillPasteSmart extends Clipboard {
         td.innerHTML = th.innerHTML;
         th.parentNode.replaceChild(td, th);
       });
-      // if table not allowed tag, convert content to paragraphs
-      if (!DOMPurifyOptions.ALLOWED_TAGS.includes('table')) {
-        table.outerHTML = this.convertTableToParagraphs(table);
-      }
     });
     return tempDiv.innerHTML;
   }
 
-  convertTableToParagraphs(tableElement) {
-    return Array.from(tableElement.querySelectorAll('tr')).map(tr => {
-      const rowText = Array.from(tr.querySelectorAll('td')).map(td => td.innerHTML).join(' ');
-      return (this.substituteBlockElements !== false ) ? `<p>${rowText}</p>` : `${rowText} `;
-    }).join('');
-  };
+  convertTableContent(html) {
+    const tempDiv = document.createElement('div');
+    tempDiv.innerHTML = html;
+
+    // Convert <tr> elements to <p> elements, concatenate td & th cell contents with inner space added
+    Array.from(tempDiv.querySelectorAll('tr')).forEach(tr => {
+      tr.outerHTML = `<p>${Array.from(tr.querySelectorAll('td, th')).map(cell => cell.innerHTML).join(' ')}</p>`
+    });
+
+    // Convert orphan td & th elements to their innerHTML plus trailing space
+    Array.from(tempDiv.querySelectorAll('td, th')).forEach(cell => {
+      cell.outerHTML = `${cell.innerHTML} `;
+    });
+
+    return tempDiv.innerHTML;
+  }
 
   getDOMPurifyOptions() {
     let tidy = {};
@@ -376,81 +387,81 @@ class QuillPasteSmart extends Clipboard {
     return tidy;
   }
 
-// replace forbidden block elements with a p tag
-substitute(html, DOMPurifyOptions) {
-  let substitution;
+  // replace forbidden block elements with a p tag
+  substitute(html, DOMPurifyOptions) {
+    let substitution;
 
-  const headings = ['h1', 'h2', 'h3', 'h4', 'h5', 'h6'];
-  const blockElements = [
-    'p',
-    'div',
-    'section',
-    'article',
-    'fieldset',
-    'address',
-    'aside',
-    'blockquote',
-    'canvas',
-    'dl',
-    'figcaption',
-    'figure',
-    'footer',
-    'form',
-    'header',
-    'main',
-    'nav',
-    'noscript',
-    'ol',
-    'pre',
-    'table',
-    'tr',
-    'ul',
-    'video',
-  ];
-  const newLineElements = ['li', 'dt', 'dd', 'hr'];
+    const headings = ['h1', 'h2', 'h3', 'h4', 'h5', 'h6'];
+    const blockElements = [
+      'p',
+      'div',
+      'section',
+      'article',
+      'fieldset',
+      'address',
+      'aside',
+      'blockquote',
+      'canvas',
+      'dl',
+      'figcaption',
+      'figure',
+      'footer',
+      'form',
+      'header',
+      'main',
+      'nav',
+      'noscript',
+      'ol',
+      'pre',
+      'table',
+      'tr',
+      'ul',
+      'video',
+    ];
+    const newLineElements = ['li', 'dt', 'dd', 'hr'];
 
-  DOMPurify.addHook('uponSanitizeElement', (node, data, config) => {
-    // check if current tag is a heading
-    // - is it supported?
-    // - no? - replace it with <p> and <b>
-    // -----------------
-    // check if current tag is a block element
-    // - is it supported?
-    // - no? - replace it with <p>
-    // -----------------
-    // check if current tag is a new line element
-    // - is it supported?
-    // - no? - remove the tag and append a <br>
+    DOMPurify.addHook('uponSanitizeElement', (node, data, config) => {
+      // check if current tag is a heading
+      // - is it supported?
+      // - no? - replace it with <p> and <b>
+      // -----------------
+      // check if current tag is a block element
+      // - is it supported?
+      // - no? - replace it with <p>
+      // -----------------
+      // check if current tag is a new line element
+      // - is it supported?
+      // - no? - remove the tag and append a <br>
 
-    // find possible substitution
-    let i = 0;
-    while (!substitution && i < 3) {
-      if (DOMPurifyOptions.ALLOWED_TAGS.includes(blockElements[i])) substitution = blockElements[i];
-      ++i;
-    }
-
-    if (substitution && node.tagName && !DOMPurifyOptions.ALLOWED_TAGS.includes(node.tagName.toLowerCase())) {
-      const tagName = node.tagName.toLowerCase();
-      if (headings.includes(tagName)) {
-        node.innerHTML = `<${substitution}><b>${node.innerHTML}</b></${substitution}>`;
-      } else if (blockElements.includes(tagName)) {
-        node.innerHTML = `<${substitution}>${node.innerHTML}</${substitution}>`;
-      } else if (newLineElements.includes(tagName)) {
-        node.innerHTML = `${node.innerHTML}<br>`;
+      // find possible substitution
+      let i = 0;
+      while (!substitution && i < 3) {
+        if (DOMPurifyOptions.ALLOWED_TAGS.includes(blockElements[i])) substitution = blockElements[i];
+        ++i;
       }
-    }
-  });
 
-  html = DOMPurify.sanitize(html, { ...DOMPurifyOptions, ...{ RETURN_DOM: true, WHOLE_DOCUMENT: false } });
-  DOMPurify.removeAllHooks();
+      if (substitution && node.tagName && !DOMPurifyOptions.ALLOWED_TAGS.includes(node.tagName.toLowerCase())) {
+        const tagName = node.tagName.toLowerCase();
+        if (headings.includes(tagName)) {
+          node.innerHTML = `<${substitution}><b>${node.innerHTML}</b></${substitution}>`;
+        } else if (blockElements.includes(tagName)) {
+          node.innerHTML = `<${substitution}>${node.innerHTML}</${substitution}>`;
+        } else if (newLineElements.includes(tagName)) {
+          node.innerHTML = `${node.innerHTML}<br>`;
+        }
+      }
+    });
 
-  return [html, substitution];
-}
+    html = DOMPurify.sanitize(html, { ...DOMPurifyOptions, ...{ RETURN_DOM: true, WHOLE_DOCUMENT: false } });
+    DOMPurify.removeAllHooks();
 
-isURL(str) {
-  const pattern = /^(?:(?:https?|ftp):\/\/)(?:\S+(?::\S*)?@)?(?:(?!10(?:\.\d{1,3}){3})(?!127(?:\.\d{1,3}){3})(?!169\.254(?:\.\d{1,3}){2})(?!192\.168(?:\.\d{1,3}){2})(?!172\.(?:1[6-9]|2\d|3[0-1])(?:\.\d{1,3}){2})(?:[1-9]\d?|1\d\d|2[01]\d|22[0-3])(?:\.(?:1?\d{1,2}|2[0-4]\d|25[0-5])){2}(?:\.(?:[1-9]\d?|1\d\d|2[0-4]\d|25[0-4]))|(?:(?:[a-z\u00a1-\uffff0-9]+-?)*[a-z\u00a1-\uffff0-9]+)(?:\.(?:[a-z\u00a1-\uffff0-9]+-?)*[a-z\u00a1-\uffff0-9]+)*(?:\.(?:[a-z\u00a1-\uffff]{2,})))(?::\d{2,5})?(?:\/[^\s]*)?$/isu;
-  return !!pattern.test(str);
-}
+    return [html, substitution];
+  }
+
+  isURL(str) {
+    const pattern = /^(?:(?:https?|ftp):\/\/)(?:\S+(?::\S*)?@)?(?:(?!10(?:\.\d{1,3}){3})(?!127(?:\.\d{1,3}){3})(?!169\.254(?:\.\d{1,3}){2})(?!192\.168(?:\.\d{1,3}){2})(?!172\.(?:1[6-9]|2\d|3[0-1])(?:\.\d{1,3}){2})(?:[1-9]\d?|1\d\d|2[01]\d|22[0-3])(?:\.(?:1?\d{1,2}|2[0-4]\d|25[0-5])){2}(?:\.(?:[1-9]\d?|1\d\d|2[0-4]\d|25[0-4]))|(?:(?:[a-z\u00a1-\uffff0-9]+-?)*[a-z\u00a1-\uffff0-9]+)(?:\.(?:[a-z\u00a1-\uffff0-9]+-?)*[a-z\u00a1-\uffff0-9]+)*(?:\.(?:[a-z\u00a1-\uffff]{2,})))(?::\d{2,5})?(?:\/[^\s]*)?$/isu;
+    return !!pattern.test(str);
+  }
 }
 
 Quill.register('modules/clipboard', QuillPasteSmart, true);
