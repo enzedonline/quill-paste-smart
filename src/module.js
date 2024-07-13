@@ -170,7 +170,7 @@ class QuillPasteSmart extends Clipboard {
           tbody.insertBefore(firstRow, tbody.firstChild);
         }
       }
-      thead.remove();
+      thead?.remove();
       // Convert all <th> elements to <td> elements
       const thElements = table.querySelectorAll('th');
       thElements.forEach(th => {
