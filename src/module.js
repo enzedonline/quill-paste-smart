@@ -7,6 +7,7 @@ const Delta = Quill.import('delta');
 class QuillPasteSmart extends Clipboard {
   constructor(quill, options) {
     super(quill, options);
+
     this.allowed = options.allowed;
     this.keepSelection = options.keepSelection;
     this.substituteBlockElements = options.substituteBlockElements;
@@ -23,7 +24,7 @@ class QuillPasteSmart extends Clipboard {
     e.preventDefault();
 
     const range = this.quill.getSelection();
-    if (range == null) return;
+    if (range == null)  return;
 
     let text = e.clipboardData?.getData('text/plain');
     let html = e.clipboardData?.getData('text/html');
@@ -128,7 +129,7 @@ class QuillPasteSmart extends Clipboard {
 
     if (!plainText) {
       // move cursor
-      delta = this.convert(content);
+      delta = this.convert({ html: content });
     }
 
     if (this.keepSelection) this.quill.setSelection(range.index, delta.length(), Quill.sources.SILENT);
@@ -139,9 +140,9 @@ class QuillPasteSmart extends Clipboard {
 
   collapseConsecutiveSubstitutionTags(html, substitution) {
     // Remove all consecutive occurances of substitution (e.g. <p></p>) from html, include tags with only whitespace
-    const tempDiv = document.createElement('div');
-    tempDiv.innerHTML = html;
-    const tags = tempDiv.querySelectorAll(substitution);
+    const parser = new DOMParser()
+    const doc = parser.parseFromString(html, 'text/html');
+    const tags = doc.querySelectorAll(substitution);
     let removeNextTag = false;
     tags.forEach(tag => {
       if (!removeNextTag) {
@@ -155,15 +156,15 @@ class QuillPasteSmart extends Clipboard {
         removeNextTag = false;
       }
     });
-    return tempDiv.innerHTML;
+    return doc.body.innerHTML;
   }
 
   tableHeadersToCells(html) {
     // Quill table doesn't support header cells
     // Move first <tr> from <thead> to <tbody>, convert all <th> to <td>
-    const tempDiv = document.createElement('div');
-    tempDiv.innerHTML = html;
-    const tables = tempDiv.querySelectorAll('table');
+    const parser = new DOMParser()
+    const doc = parser.parseFromString(html, 'text/html');
+    const tables = doc.querySelectorAll('table');
     tables.forEach(table => {
       // Check if the table has a <thead> element
       const thead = table.querySelector('thead');
@@ -174,7 +175,6 @@ class QuillPasteSmart extends Clipboard {
           const firstRow = thead.querySelector('tr');
           tbody.insertBefore(firstRow, tbody.firstChild);
         }
-        thead.remove();
       }
       // Convert all <th> elements to <td> elements
       const thElements = table.querySelectorAll('th');
@@ -184,24 +184,34 @@ class QuillPasteSmart extends Clipboard {
         th.parentNode.replaceChild(td, th);
       });
     });
-    return tempDiv.innerHTML;
+    return `<html>${doc.body.outerHTML}<html>`;
   }
 
   convertTableContent(html) {
-    const tempDiv = document.createElement('div');
-    tempDiv.innerHTML = html;
+    const parser = new DOMParser()
+    const doc = parser.parseFromString(html, 'text/html');
 
     // Convert <tr> elements to <p> elements, concatenate td & th cell contents with inner space added
-    Array.from(tempDiv.querySelectorAll('tr')).forEach(tr => {
+    doc.querySelectorAll('tr').forEach(tr => {
       tr.outerHTML = `<p>${Array.from(tr.querySelectorAll('td, th')).map(cell => cell.innerHTML).join(' ')}</p>`
     });
 
     // Convert orphan td & th elements to their innerHTML plus trailing space
-    Array.from(tempDiv.querySelectorAll('td, th')).forEach(cell => {
+    doc.querySelectorAll('td, th').forEach(cell => {
       cell.outerHTML = `${cell.innerHTML} `;
     });
+  
+    // Collapse thead, tbody, and tfoot elements to their innerHTML
+    doc.querySelectorAll('thead, tbody, tfoot').forEach(rowContainers => {
+      rowContainers.outerHTML = rowContainers.innerHTML;
+    });
 
-    return tempDiv.innerHTML;
+    // Collapse table elements to their innerHTML
+    doc.querySelectorAll('table').forEach(tableEle => {
+      tableEle.outerHTML = tableEle.innerHTML;
+    });
+
+    return `<html>${doc.body.outerHTML}<html>`;
   }
 
   getDOMPurifyOptions() {
@@ -366,9 +376,9 @@ class QuillPasteSmart extends Clipboard {
               tidy.ALLOWED_TAGS.push('td');
             }
             break;
-
         }
       });
+
       // support custom toolbar buttons from options
       if (toolbar?.controls) {
         this.customButtons?.forEach((button) => {
@@ -413,8 +423,6 @@ class QuillPasteSmart extends Clipboard {
       'noscript',
       'ol',
       'pre',
-      'table',
-      'tr',
       'ul',
       'video',
     ];
